@@ -276,6 +276,38 @@
   ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev =>
     document.addEventListener(ev, e => stopVoice(e.pointerId)));
 
+  // fallbacks for webviews without pointer events
+  if (!window.PointerEvent) {
+    keysEl.addEventListener('touchstart', e => {
+      e.preventDefault();
+      for (const t of e.changedTouches) {
+        const key = keyAt(t.clientX, t.clientY);
+        if (key) startVoice(t.identifier, key);
+      }
+    }, { passive: false });
+    keysEl.addEventListener('touchmove', e => {
+      e.preventDefault();
+      for (const t of e.changedTouches) {
+        const v = voices.get(t.identifier);
+        if (!v) continue;
+        const key = keyAt(t.clientX, t.clientY);
+        if (key && key !== v.el) {
+          stopVoice(t.identifier);
+          startVoice(t.identifier, key);
+        }
+      }
+    }, { passive: false });
+    ['touchend', 'touchcancel'].forEach(ev =>
+      document.addEventListener(ev, e => {
+        for (const t of e.changedTouches) stopVoice(t.identifier);
+      }));
+    keysEl.addEventListener('mousedown', e => {
+      const key = keyAt(e.clientX, e.clientY);
+      if (key) startVoice('mouse', key);
+    });
+    document.addEventListener('mouseup', () => stopVoice('mouse'));
+  }
+
   fundEl.addEventListener('change', () => {
     fundamental = parseFloat(fundEl.value);
     buildKeys();
@@ -297,6 +329,9 @@
   });
 
   buildKeys();
+  // visible proof that scripts are running; static text means JS is blocked
+  document.getElementById('hint').textContent =
+    '✓ Ready — tap or drag the keys to play. Amber notes stray from 12-TET.';
 })();
 </script>
 </body>
