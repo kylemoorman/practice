@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Harmonic Series Keyboard</title>
+<style>
+  :root {
+    --bg: #14161c;
+    --panel: #1e2129;
+    --text: #e8e6df;
+    --dim: #8b8fa0;
+    --accent: #e8a33d;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #app {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  header {
+    padding: 10px 12px 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+  header h1 {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    flex: 1 1 auto;
+    white-space: nowrap;
+  }
+  header h1 small { color: var(--dim); font-weight: 400; }
+  .controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  select, .seg {
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid #333845;
+    border-radius: 8px;
+    font-size: 14px;
+    height: 36px;
+  }
+  select { padding: 0 8px; }
+  .seg { display: flex; overflow: hidden; }
+  .seg button {
+    background: transparent;
+    color: var(--dim);
+    border: none;
+    font-size: 13px;
+    padding: 0 12px;
+    height: 100%;
+  }
+  .seg button.on {
+    background: var(--accent);
+    color: #14161c;
+    font-weight: 600;
+  }
+  #hint {
+    padding: 0 12px 6px;
+    font-size: 12px;
+    color: var(--dim);
+  }
+  #keys {
+    flex: 1;
+    display: flex;
+    flex-wrap: wrap;
+    align-content: stretch;
+    gap: 4px;
+    padding: 4px 8px calc(8px + env(safe-area-inset-bottom));
+    min-height: 0;
+  }
+  .key {
+    flex: 1 1 0;
+    min-width: 34px;
+    border-radius: 10px;
+    background: linear-gradient(180deg, #262a34, #1c1f27);
+    border: 1px solid #343947;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    align-items: center;
+    padding-bottom: 10px;
+    gap: 2px;
+    position: relative;
+    overflow: hidden;
+  }
+  .key .h {
+    position: absolute;
+    top: 8px;
+    font-size: 11px;
+    color: var(--dim);
+  }
+  .key .note { font-size: 16px; font-weight: 700; }
+  .key .cents { font-size: 10px; color: var(--dim); }
+  .key .hz { font-size: 9px; color: #565b6b; }
+  .key.offish .note { color: var(--accent); }
+  .key.active {
+    background: linear-gradient(180deg, #e8a33d, #c9882a);
+    border-color: #f0c070;
+  }
+  .key.active .note, .key.active .h, .key.active .cents, .key.active .hz {
+    color: #14161c;
+  }
+  /* split 16–32 mode into two rows */
+  #keys.dense .key { flex-basis: calc(100% / 9 - 4px); }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Harmonic keyboard <small>— natural trumpet scale</small></h1>
+    <div class="controls">
+      <select id="fund" title="Fundamental">
+        <option value="49.00">G1 · 49 Hz</option>
+        <option value="55.00">A1 · 55 Hz</option>
+        <option value="65.41" selected>C2 · 65.4 Hz</option>
+        <option value="73.42">D2 · 73.4 Hz</option>
+        <option value="87.31">F2 · 87.3 Hz</option>
+        <option value="98.00">G2 · 98 Hz</option>
+      </select>
+      <div class="seg" id="range">
+        <button data-lo="8" class="on">8–16</button>
+        <button data-lo="16">16–32</button>
+      </div>
+      <div class="seg" id="tone">
+        <button data-tone="horn" class="on">Horn</button>
+        <button data-tone="sine">Sine</button>
+      </div>
+    </div>
+  </header>
+  <div id="hint">True just-intonation pitches (n × f₀). Amber notes stray from 12-TET — drag across keys to sweep.</div>
+  <div id="keys"></div>
+</div>
+
+<script>
+(() => {
+  const NOTE_NAMES = ['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'];
+  const keysEl = document.getElementById('keys');
+  const fundEl = document.getElementById('fund');
+
+  let fundamental = parseFloat(fundEl.value);
+  let lowHarmonic = 8;
+  let toneType = 'horn';
+
+  let ctx = null;
+  let master = null;
+  let hornWave = null;
+  const voices = new Map(); // pointerId -> {osc, gain, el}
+
+  function audio() {
+    if (!ctx) {
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+      master = ctx.createGain();
+      master.gain.value = 0.5;
+      const comp = ctx.createDynamicsCompressor();
+      master.connect(comp).connect(ctx.destination);
+      // brassy-ish spectrum for the horn tone
+      const n = 8;
+      const real = new Float32Array(n + 1);
+      const imag = new Float32Array(n + 1);
+      for (let i = 1; i <= n; i++) imag[i] = 1 / (i * 1.3);
+      hornWave = ctx.createPeriodicWave(real, imag);
+    }
+    if (ctx.state === 'suspended') ctx.resume();
+    return ctx;
+  }
+
+  function describe(freq) {
+    const midi = 69 + 12 * Math.log2(freq / 440);
+    const nearest = Math.round(midi);
+    const cents = Math.round((midi - nearest) * 100);
+    const name = NOTE_NAMES[((nearest % 12) + 12) % 12];
+    const octave = Math.floor(nearest / 12) - 1;
+    return { name, octave, cents };
+  }
+
+  function buildKeys() {
+    keysEl.innerHTML = '';
+    const hi = lowHarmonic * 2;
+    keysEl.classList.toggle('dense', lowHarmonic === 16);
+    for (let h = lowHarmonic; h <= hi; h++) {
+      const freq = fundamental * h;
+      const { name, octave, cents } = describe(freq);
+      const key = document.createElement('div');
+      key.className = 'key' + (Math.abs(cents) >= 15 ? ' offish' : '');
+      key.dataset.freq = freq;
+      key.innerHTML =
+        `<span class="h">${h}</span>` +
+        `<span class="note">${name}<sub>${octave}</sub></span>` +
+        `<span class="cents">${cents === 0 ? '±0' : (cents > 0 ? '+' : '') + cents}¢</span>` +
+        `<span class="hz">${freq.toFixed(1)}</span>`;
+      keysEl.appendChild(key);
+    }
+  }
+
+  function startVoice(pointerId, keyEl) {
+    const ac = audio();
+    const freq = parseFloat(keyEl.dataset.freq);
+    const osc = ac.createOscillator();
+    if (toneType === 'horn' && hornWave) osc.setPeriodicWave(hornWave);
+    else osc.type = 'sine';
+    osc.frequency.value = freq;
+    const gain = ac.createGain();
+    gain.gain.setValueAtTime(0.0001, ac.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.35, ac.currentTime + 0.02);
+    osc.connect(gain).connect(master);
+    osc.start();
+    voices.set(pointerId, { osc, gain, el: keyEl });
+    keyEl.classList.add('active');
+  }
+
+  function stopVoice(pointerId) {
+    const v = voices.get(pointerId);
+    if (!v) return;
+    voices.delete(pointerId);
+    v.el.classList.remove('active');
+    const t = ctx.currentTime;
+    v.gain.gain.cancelScheduledValues(t);
+    v.gain.gain.setValueAtTime(Math.max(v.gain.gain.value, 0.0001), t);
+    v.gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+    v.osc.stop(t + 0.15);
+  }
+
+  function keyAt(x, y) {
+    const el = document.elementFromPoint(x, y);
+    return el ? el.closest('.key') : null;
+  }
+
+  keysEl.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    const key = keyAt(e.clientX, e.clientY);
+    if (key) startVoice(e.pointerId, key);
+  });
+
+  keysEl.addEventListener('pointermove', e => {
+    const v = voices.get(e.pointerId);
+    if (!v) return;
+    const key = keyAt(e.clientX, e.clientY);
+    if (key && key !== v.el) {
+      stopVoice(e.pointerId);
+      startVoice(e.pointerId, key);
+    }
+  });
+
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev =>
+    document.addEventListener(ev, e => stopVoice(e.pointerId)));
+
+  fundEl.addEventListener('change', () => {
+    fundamental = parseFloat(fundEl.value);
+    buildKeys();
+  });
+
+  document.getElementById('range').addEventListener('click', e => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    lowHarmonic = parseInt(btn.dataset.lo, 10);
+    btn.parentNode.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === btn));
+    buildKeys();
+  });
+
+  document.getElementById('tone').addEventListener('click', e => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    toneType = btn.dataset.tone;
+    btn.parentNode.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === btn));
+  });
+
+  buildKeys();
+})();
+</script>
+</body>
+</html>
