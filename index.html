@@ -183,8 +183,9 @@
       // larger buffers: avoids crackle/underruns on USB & Bluetooth outputs
       ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'playback' });
       master = ctx.createGain();
-      // headroom so multi-touch never clips external DACs
-      master.gain.value = 0.35;
+      // headroom: keep a worst-case pileup of overlapping release
+      // tails (one per key) below full scale to avoid clipping
+      master.gain.value = 0.25;
       master.connect(ctx.destination);
       // brassy-ish spectrum for the horn tone
       const n = 8;
@@ -246,6 +247,7 @@
   }
 
   function startVoice(pointerId, keyEl) {
+    if (voices.has(pointerId)) stopVoice(pointerId);
     const ac = audio();
     const freq = parseFloat(keyEl.dataset.freq);
     const osc = ac.createOscillator();
@@ -254,7 +256,7 @@
     osc.frequency.value = freq;
     const gain = ac.createGain();
     gain.gain.setValueAtTime(0.0001, ac.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.35, ac.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.3, ac.currentTime + 0.02);
     osc.connect(gain).connect(master);
     osc.start();
     voices.set(pointerId, { osc, gain, el: keyEl });
@@ -278,7 +280,21 @@
 
   function keyAt(x, y) {
     const el = document.elementFromPoint(x, y);
-    return el ? el.closest('.key') : null;
+    const key = el && el.closest('.key');
+    if (key) return key;
+    // fast taps often land in the gaps between keys; snap to the
+    // nearest key instead of dropping the touch
+    const area = keysEl.getBoundingClientRect();
+    if (x < area.left || x > area.right || y < area.top || y > area.bottom) return null;
+    let best = null, bestDist = Infinity;
+    for (const k of keysEl.children) {
+      const b = k.getBoundingClientRect();
+      const dx = Math.max(b.left - x, 0, x - b.right);
+      const dy = Math.max(b.top - y, 0, y - b.bottom);
+      const d = dx * dx + dy * dy;
+      if (d < bestDist) { bestDist = d; best = k; }
+    }
+    return best;
   }
 
   keysEl.addEventListener('pointerdown', e => {
