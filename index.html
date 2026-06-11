@@ -80,8 +80,23 @@
     font-size: 12px;
     color: var(--dim);
   }
-  #keys {
+  #scope {
     flex: 1;
+    min-height: 0;
+    margin: 2px 8px;
+    position: relative;
+  }
+  #scope canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border-radius: 12px;
+  }
+  #keys {
+    flex: 0 0 auto;
+    height: 15vh;
+    height: 15dvh;
     display: flex;
     flex-wrap: wrap;
     align-content: stretch;
@@ -110,6 +125,18 @@
     font-size: 11px;
     color: var(--dim);
   }
+  .key .kbd {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    font-size: 9px;
+    color: #565b6b;
+    text-transform: uppercase;
+    display: none;
+  }
+  /* show typing hints once a physical keyboard is used */
+  body.kbd-on .key .kbd { display: block; }
+  .key.active .kbd { color: #14161c; }
   .key .note { font-size: 16px; font-weight: 700; }
   .key .cents { font-size: 10px; color: var(--dim); }
   .key .hz { font-size: 9px; color: #565b6b; }
@@ -122,6 +149,10 @@
     color: #14161c;
   }
   /* split 16–32 mode into two rows */
+  #keys.dense {
+    height: 24vh;
+    height: 24dvh;
+  }
   #keys.dense .key { flex-basis: calc(100% / 9 - 4px); }
 </style>
 </head>
@@ -150,22 +181,24 @@
   </header>
   <div id="hint">True just-intonation pitches (n × f₀). Amber notes stray from 12-TET — drag across keys to sweep.</div>
   <noscript><div id="hint" style="color:#e8a33d">JavaScript is disabled in this viewer, so the keys won't make sound. Open this file in Safari or Chrome instead.</div></noscript>
+  <div id="scope"><canvas></canvas></div>
   <div id="keys">
-    <div class="key" data-freq="523.28"><span class="h">8</span><span class="note">C<sub>5</sub></span><span class="cents">±0¢</span><span class="hz">523.3</span></div>
-    <div class="key" data-freq="588.69"><span class="h">9</span><span class="note">D<sub>5</sub></span><span class="cents">+4¢</span><span class="hz">588.7</span></div>
-    <div class="key" data-freq="654.10"><span class="h">10</span><span class="note">E<sub>5</sub></span><span class="cents">-14¢</span><span class="hz">654.1</span></div>
-    <div class="key offish" data-freq="719.51"><span class="h">11</span><span class="note">F♯<sub>5</sub></span><span class="cents">-49¢</span><span class="hz">719.5</span></div>
-    <div class="key" data-freq="784.92"><span class="h">12</span><span class="note">G<sub>5</sub></span><span class="cents">+2¢</span><span class="hz">784.9</span></div>
-    <div class="key offish" data-freq="850.33"><span class="h">13</span><span class="note">G♯<sub>5</sub></span><span class="cents">+41¢</span><span class="hz">850.3</span></div>
-    <div class="key offish" data-freq="915.74"><span class="h">14</span><span class="note">A♯<sub>5</sub></span><span class="cents">-31¢</span><span class="hz">915.7</span></div>
-    <div class="key" data-freq="981.15"><span class="h">15</span><span class="note">B<sub>5</sub></span><span class="cents">-12¢</span><span class="hz">981.1</span></div>
-    <div class="key" data-freq="1046.56"><span class="h">16</span><span class="note">C<sub>6</sub></span><span class="cents">±0¢</span><span class="hz">1046.6</span></div>
+    <div class="key" data-freq="523.28"><span class="h">8</span><span class="kbd">a</span><span class="note">C<sub>5</sub></span><span class="cents">±0¢</span><span class="hz">523.3</span></div>
+    <div class="key" data-freq="588.69"><span class="h">9</span><span class="kbd">s</span><span class="note">D<sub>5</sub></span><span class="cents">+4¢</span><span class="hz">588.7</span></div>
+    <div class="key" data-freq="654.10"><span class="h">10</span><span class="kbd">d</span><span class="note">E<sub>5</sub></span><span class="cents">-14¢</span><span class="hz">654.1</span></div>
+    <div class="key offish" data-freq="719.51"><span class="h">11</span><span class="kbd">f</span><span class="note">F♯<sub>5</sub></span><span class="cents">-49¢</span><span class="hz">719.5</span></div>
+    <div class="key" data-freq="784.92"><span class="h">12</span><span class="kbd">g</span><span class="note">G<sub>5</sub></span><span class="cents">+2¢</span><span class="hz">784.9</span></div>
+    <div class="key offish" data-freq="850.33"><span class="h">13</span><span class="kbd">h</span><span class="note">G♯<sub>5</sub></span><span class="cents">+41¢</span><span class="hz">850.3</span></div>
+    <div class="key offish" data-freq="915.74"><span class="h">14</span><span class="kbd">j</span><span class="note">A♯<sub>5</sub></span><span class="cents">-31¢</span><span class="hz">915.7</span></div>
+    <div class="key" data-freq="981.15"><span class="h">15</span><span class="kbd">k</span><span class="note">B<sub>5</sub></span><span class="cents">-12¢</span><span class="hz">981.1</span></div>
+    <div class="key" data-freq="1046.56"><span class="h">16</span><span class="kbd">l</span><span class="note">C<sub>6</sub></span><span class="cents">±0¢</span><span class="hz">1046.6</span></div>
   </div>
 </div>
 
 <script>
 (() => {
   const NOTE_NAMES = ['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'];
+  const KB_KEYS = 'asdfghjklqwertyuiop'; // typing layout, indexed by key position
   const keysEl = document.getElementById('keys');
   const fundEl = document.getElementById('fund');
 
@@ -176,6 +209,7 @@
   let ctx = null;
   let master = null;
   let hornWave = null;
+  let analyser = null;
   const voices = new Map(); // pointerId -> {osc, gain, el}
 
   function audio() {
@@ -187,6 +221,9 @@
       // tails (one per key) below full scale to avoid clipping
       master.gain.value = 0.25;
       master.connect(ctx.destination);
+      analyser = ctx.createAnalyser();
+      analyser.fftSize = SCOPE_SAMPLES;
+      master.connect(analyser);
       // brassy-ish spectrum for the horn tone
       const n = 8;
       const real = new Float32Array(n + 1);
@@ -237,8 +274,10 @@
       const key = document.createElement('div');
       key.className = 'key' + (Math.abs(cents) >= 15 ? ' offish' : '');
       key.dataset.freq = freq;
+      const kbChar = KB_KEYS[h - lowHarmonic] || '';
       key.innerHTML =
         `<span class="h">${h}</span>` +
+        `<span class="kbd">${kbChar}</span>` +
         `<span class="note">${name}<sub>${octave}</sub></span>` +
         `<span class="cents">${cents === 0 ? '±0' : (cents > 0 ? '+' : '') + cents}¢</span>` +
         `<span class="hz">${freq.toFixed(1)}</span>`;
@@ -347,6 +386,80 @@
     });
     document.addEventListener('mouseup', () => stopVoice('mouse'));
   }
+
+  // --- play with a computer keyboard, Ableton-style: home row for
+  // the first nine harmonics, QWERTY row continues in 16-32 mode ---
+  document.addEventListener('keydown', e => {
+    if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.target && e.target.tagName === 'SELECT') return;
+    const idx = KB_KEYS.indexOf(e.key.toLowerCase());
+    if (idx < 0) return;
+    const keyEl = keysEl.children[idx];
+    if (!keyEl) return;
+    e.preventDefault();
+    document.body.classList.add('kbd-on');
+    startVoice('kb' + idx, keyEl);
+  });
+  document.addEventListener('keyup', e => {
+    const idx = KB_KEYS.indexOf(e.key.toLowerCase());
+    if (idx >= 0) stopVoice('kb' + idx);
+  });
+  // keyup events are lost when the window loses focus mid-press
+  window.addEventListener('blur', () => {
+    for (const id of [...voices.keys()]) stopVoice(id);
+  });
+
+  // --- oscilloscope: master-bus waveform wrapped into a ring, so a
+  // tone with n cycles per buffer draws an n-lobed wobbling shape ---
+  const SCOPE_SAMPLES = 1024;
+  const scopeBuf = new Uint8Array(SCOPE_SAMPLES);
+  const scopeCanvas = document.querySelector('#scope canvas');
+  const g = scopeCanvas.getContext('2d');
+  let rot = 0;
+
+  function sizeScope() {
+    const dpr = window.devicePixelRatio || 1;
+    const r = scopeCanvas.getBoundingClientRect();
+    scopeCanvas.width = Math.max(1, Math.round(r.width * dpr));
+    scopeCanvas.height = Math.max(1, Math.round(r.height * dpr));
+    g.fillStyle = '#14161c';
+    g.fillRect(0, 0, scopeCanvas.width, scopeCanvas.height);
+  }
+  window.addEventListener('resize', sizeScope);
+  window.addEventListener('orientationchange', sizeScope);
+
+  function drawScope() {
+    requestAnimationFrame(drawScope);
+    const w = scopeCanvas.width, h = scopeCanvas.height;
+    if (!w || !h) return;
+    // translucent wipe leaves a phosphor-style trail
+    g.fillStyle = 'rgba(20, 22, 28, 0.25)';
+    g.fillRect(0, 0, w, h);
+    if (analyser) analyser.getByteTimeDomainData(scopeBuf);
+    else scopeBuf.fill(128);
+    const cx = w / 2, cy = h / 2;
+    const R = Math.min(w, h) * 0.33;
+    rot += 0.004;
+    g.beginPath();
+    for (let i = 0; i <= SCOPE_SAMPLES; i++) {
+      const v = (scopeBuf[i % SCOPE_SAMPLES] - 128) / 128;
+      const a = rot + (i / SCOPE_SAMPLES) * 2 * Math.PI;
+      const r = R * (1 + 0.6 * v);
+      const x = cx + r * Math.cos(a);
+      const y = cy + r * Math.sin(a);
+      if (i) g.lineTo(x, y); else g.moveTo(x, y);
+    }
+    const dpr = window.devicePixelRatio || 1;
+    g.lineJoin = 'round';
+    g.strokeStyle = 'rgba(232, 163, 61, 0.25)';
+    g.lineWidth = 5 * dpr;
+    g.stroke();
+    g.strokeStyle = '#ffd9a0';
+    g.lineWidth = 1.5 * dpr;
+    g.stroke();
+  }
+  sizeScope();
+  requestAnimationFrame(drawScope);
 
   fundEl.addEventListener('change', () => {
     fundamental = parseFloat(fundEl.value);
