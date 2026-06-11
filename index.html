@@ -369,8 +369,8 @@
     v.gain.gain.cancelScheduledValues(t);
     v.gain.gain.setValueAtTime(Math.max(v.gain.gain.value, 0.0001), t);
     // asymptotic release lands at true zero — no click at oscillator stop
-    v.gain.gain.setTargetAtTime(0, t, 0.35);
-    v.osc.stop(t + 2.5);
+    v.gain.gain.setTargetAtTime(0, t, 1.4);
+    v.osc.stop(t + 7);
   }
 
   function keyAt(x, y) {
