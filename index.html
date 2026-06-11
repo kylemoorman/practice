@@ -154,6 +154,25 @@
     height: 24dvh;
   }
   #keys.dense .key { flex-basis: calc(100% / 9 - 4px); }
+  /* full mode: three QWERTY rows, harmonics 1-33 */
+  #keys.matrix {
+    height: 32vh;
+    height: 32dvh;
+    flex-direction: column;
+    flex-wrap: nowrap;
+  }
+  #keys.matrix .krow {
+    flex: 1;
+    display: flex;
+    gap: 4px;
+    min-height: 0;
+  }
+  #keys.matrix .key { min-width: 0; padding-bottom: 4px; }
+  #keys.matrix .key .h { top: 4px; left: 4px; font-size: 9px; }
+  #keys.matrix .key .kbd { top: 4px; display: block; }
+  #keys.matrix .key .note { font-size: 12px; }
+  #keys.matrix .key .cents { font-size: 8px; }
+  #keys.matrix .key .hz { display: none; }
 </style>
 </head>
 <body>
@@ -170,8 +189,9 @@
         <option value="98.00">G2 · 98 Hz</option>
       </select>
       <div class="seg" id="range">
-        <button data-lo="8" class="on">8–16</button>
-        <button data-lo="16">16–32</button>
+        <button data-mode="8" class="on">8–16</button>
+        <button data-mode="16">16–32</button>
+        <button data-mode="full">Full</button>
       </div>
       <div class="seg" id="tone">
         <button data-tone="horn" class="on">Horn</button>
@@ -199,11 +219,15 @@
 (() => {
   const NOTE_NAMES = ['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'];
   const KB_KEYS = 'asdfghjklqwertyuiop'; // typing layout, indexed by key position
+  // full mode: physical rows top-to-bottom; harmonics climb from the
+  // bottom row up, so Z is the fundamental and ] is harmonic 33
+  const MATRIX_ROWS = ['qwertyuiop[]', "asdfghjkl;'", 'zxcvbnm,./'];
+  const kbMap = new Map(); // typed character -> key element
   const keysEl = document.getElementById('keys');
   const fundEl = document.getElementById('fund');
 
   let fundamental = parseFloat(fundEl.value);
-  let lowHarmonic = 8;
+  let mode = '8'; // '8' | '16' | 'full'
   let toneType = 'horn';
 
   let ctx = null;
@@ -220,10 +244,21 @@
       // headroom: keep a worst-case pileup of overlapping release
       // tails (one per key) below full scale to avoid clipping
       master.gain.value = 0.25;
-      master.connect(ctx.destination);
+      // tanh soft clipper: full-keyboard pileups saturate gently
+      // instead of hard-clipping the DAC
+      const shaper = ctx.createWaveShaper();
+      const curve = new Float32Array(1024);
+      for (let i = 0; i < curve.length; i++) {
+        const x = (i / (curve.length - 1)) * 2 - 1;
+        curve[i] = Math.tanh(1.5 * x) / Math.tanh(1.5);
+      }
+      shaper.curve = curve;
+      shaper.oversample = '2x';
+      master.connect(shaper).connect(ctx.destination);
       analyser = ctx.createAnalyser();
-      analyser.fftSize = SCOPE_SAMPLES;
-      master.connect(analyser);
+      analyser.fftSize = 4096; // bins fine enough to give each harmonic its own spoke
+      analyser.smoothingTimeConstant = 0.85;
+      shaper.connect(analyser);
       // brassy-ish spectrum for the horn tone
       const n = 8;
       const real = new Float32Array(n + 1);
@@ -264,24 +299,45 @@
     return { name, octave, cents };
   }
 
+  function makeKey(h, kbChar) {
+    const freq = fundamental * h;
+    const { name, octave, cents } = describe(freq);
+    const key = document.createElement('div');
+    key.className = 'key' + (Math.abs(cents) >= 15 ? ' offish' : '');
+    key.dataset.freq = freq;
+    key.innerHTML =
+      `<span class="h">${h}</span>` +
+      `<span class="kbd">${kbChar || ''}</span>` +
+      `<span class="note">${name}<sub>${octave}</sub></span>` +
+      `<span class="cents">${cents === 0 ? '±0' : (cents > 0 ? '+' : '') + cents}¢</span>` +
+      `<span class="hz">${freq.toFixed(1)}</span>`;
+    if (kbChar) kbMap.set(kbChar, key);
+    return key;
+  }
+
   function buildKeys() {
     keysEl.innerHTML = '';
-    const hi = lowHarmonic * 2;
-    keysEl.classList.toggle('dense', lowHarmonic === 16);
-    for (let h = lowHarmonic; h <= hi; h++) {
-      const freq = fundamental * h;
-      const { name, octave, cents } = describe(freq);
-      const key = document.createElement('div');
-      key.className = 'key' + (Math.abs(cents) >= 15 ? ' offish' : '');
-      key.dataset.freq = freq;
-      const kbChar = KB_KEYS[h - lowHarmonic] || '';
-      key.innerHTML =
-        `<span class="h">${h}</span>` +
-        `<span class="kbd">${kbChar}</span>` +
-        `<span class="note">${name}<sub>${octave}</sub></span>` +
-        `<span class="cents">${cents === 0 ? '±0' : (cents > 0 ? '+' : '') + cents}¢</span>` +
-        `<span class="hz">${freq.toFixed(1)}</span>`;
-      keysEl.appendChild(key);
+    kbMap.clear();
+    keysEl.classList.toggle('dense', mode === '16');
+    keysEl.classList.toggle('matrix', mode === 'full');
+    if (mode === 'full') {
+      // assign harmonics bottom row first (z = h1), but append rows
+      // top-to-bottom so the screen matches the physical keyboard
+      const rowEls = MATRIX_ROWS.map(() => {
+        const row = document.createElement('div');
+        row.className = 'krow';
+        return row;
+      });
+      let h = 1;
+      for (let r = MATRIX_ROWS.length - 1; r >= 0; r--) {
+        for (const ch of MATRIX_ROWS[r]) rowEls[r].appendChild(makeKey(h++, ch));
+      }
+      rowEls.forEach(row => keysEl.appendChild(row));
+    } else {
+      const lo = mode === '16' ? 16 : 8;
+      for (let h = lo; h <= lo * 2; h++) {
+        keysEl.appendChild(makeKey(h, KB_KEYS[h - lo]));
+      }
     }
   }
 
@@ -313,8 +369,8 @@
     v.gain.gain.cancelScheduledValues(t);
     v.gain.gain.setValueAtTime(Math.max(v.gain.gain.value, 0.0001), t);
     // asymptotic release lands at true zero — no click at oscillator stop
-    v.gain.gain.setTargetAtTime(0, t, 0.18);
-    v.osc.stop(t + 1.4);
+    v.gain.gain.setTargetAtTime(0, t, 0.35);
+    v.osc.stop(t + 2.5);
   }
 
   function keyAt(x, y) {
@@ -326,7 +382,7 @@
     const area = keysEl.getBoundingClientRect();
     if (x < area.left || x > area.right || y < area.top || y > area.bottom) return null;
     let best = null, bestDist = Infinity;
-    for (const k of keysEl.children) {
+    for (const k of keysEl.getElementsByClassName('key')) {
       const b = k.getBoundingClientRect();
       const dx = Math.max(b.left - x, 0, x - b.right);
       const dy = Math.max(b.top - y, 0, y - b.bottom);
@@ -392,17 +448,16 @@
   document.addEventListener('keydown', e => {
     if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.target && e.target.tagName === 'SELECT') return;
-    const idx = KB_KEYS.indexOf(e.key.toLowerCase());
-    if (idx < 0) return;
-    const keyEl = keysEl.children[idx];
+    const ch = e.key.toLowerCase();
+    const keyEl = kbMap.get(ch);
     if (!keyEl) return;
     e.preventDefault();
     document.body.classList.add('kbd-on');
-    startVoice('kb' + idx, keyEl);
+    startVoice('kb:' + ch, keyEl);
   });
   document.addEventListener('keyup', e => {
-    const idx = KB_KEYS.indexOf(e.key.toLowerCase());
-    if (idx >= 0) stopVoice('kb' + idx);
+    const ch = e.key.toLowerCase();
+    if (kbMap.has(ch)) stopVoice('kb:' + ch);
   });
   // keyup events are lost when the window loses focus mid-press
   window.addEventListener('blur', () => {
@@ -413,6 +468,7 @@
   // tone with n cycles per buffer draws an n-lobed wobbling shape ---
   const SCOPE_SAMPLES = 1024;
   const scopeBuf = new Uint8Array(SCOPE_SAMPLES);
+  const freqBuf = new Uint8Array(2048); // analyser.frequencyBinCount at fftSize 4096
   const scopeCanvas = document.querySelector('#scope canvas');
   const g = scopeCanvas.getContext('2d');
   let rot = 0;
@@ -433,29 +489,70 @@
     const w = scopeCanvas.width, h = scopeCanvas.height;
     if (!w || !h) return;
     // translucent wipe leaves a phosphor-style trail
-    g.fillStyle = 'rgba(20, 22, 28, 0.25)';
+    g.fillStyle = 'rgba(20, 22, 28, 0.12)';
     g.fillRect(0, 0, w, h);
-    if (analyser) analyser.getByteTimeDomainData(scopeBuf);
-    else scopeBuf.fill(128);
+    if (analyser) {
+      analyser.getByteTimeDomainData(scopeBuf);
+      analyser.getByteFrequencyData(freqBuf);
+    } else {
+      scopeBuf.fill(128);
+      freqBuf.fill(0);
+    }
+    // loudness drives wobble depth, spin speed and color heat
+    let sum = 0;
+    for (let i = 0; i < SCOPE_SAMPLES; i++) {
+      const s = (scopeBuf[i] - 128) / 128;
+      sum += s * s;
+    }
+    const amp = Math.min(1, Math.sqrt(sum / SCOPE_SAMPLES) * 6);
     const cx = w / 2, cy = h / 2;
-    const R = Math.min(w, h) * 0.33;
-    rot += 0.004;
+    const R = Math.min(w, h) * (0.30 + 0.05 * amp);
+    rot += 0.0025 + 0.02 * amp;
+    const dpr = window.devicePixelRatio || 1;
+
+    // radial spectrum fan: spoke angle is proportional to frequency,
+    // so the harmonics of one fundamental appear at equal angular
+    // steps — interval ratios become visible as angle ratios
+    let hue = 35;
+    if (ctx && analyser) {
+      const binHz = ctx.sampleRate / analyser.fftSize;
+      const maxBin = Math.min(freqBuf.length - 1, Math.round(fundamental * 34 / binHz));
+      let wsum = 0, msum = 0;
+      g.beginPath();
+      for (let i = 1; i <= maxBin; i++) {
+        const v = freqBuf[i] / 255;
+        if (v < 0.05) continue;
+        wsum += i * v;
+        msum += v;
+        const a = rot + (i / maxBin) * 2 * Math.PI;
+        const r0 = R * 0.2;
+        const r1 = r0 + Math.pow(v, 1.5) * R * 0.85;
+        g.moveTo(cx + r0 * Math.cos(a), cy + r0 * Math.sin(a));
+        g.lineTo(cx + r1 * Math.cos(a), cy + r1 * Math.sin(a));
+      }
+      // spectral centroid tilts the color: low notes amber, high cyan
+      if (msum > 0) hue = 35 + 140 * Math.min(1, wsum / msum / maxBin * 2);
+      g.strokeStyle = `hsla(${hue}, 85%, 65%, ${0.25 + 0.45 * amp})`;
+      g.lineWidth = 1.5 * dpr;
+      g.stroke();
+    }
+
+    // waveform ring
     g.beginPath();
     for (let i = 0; i <= SCOPE_SAMPLES; i++) {
       const v = (scopeBuf[i % SCOPE_SAMPLES] - 128) / 128;
       const a = rot + (i / SCOPE_SAMPLES) * 2 * Math.PI;
-      const r = R * (1 + 0.6 * v);
+      const r = R * (1 + (0.45 + 0.4 * amp) * v);
       const x = cx + r * Math.cos(a);
       const y = cy + r * Math.sin(a);
       if (i) g.lineTo(x, y); else g.moveTo(x, y);
     }
-    const dpr = window.devicePixelRatio || 1;
     g.lineJoin = 'round';
-    g.strokeStyle = 'rgba(232, 163, 61, 0.25)';
-    g.lineWidth = 5 * dpr;
+    g.strokeStyle = `hsla(${hue}, 80%, 60%, ${0.18 + 0.3 * amp})`;
+    g.lineWidth = (4 + 6 * amp) * dpr;
     g.stroke();
-    g.strokeStyle = '#ffd9a0';
-    g.lineWidth = 1.5 * dpr;
+    g.strokeStyle = `hsl(${hue}, 85%, ${70 + 15 * amp}%)`;
+    g.lineWidth = 1.6 * dpr;
     g.stroke();
   }
   sizeScope();
@@ -469,7 +566,7 @@
   document.getElementById('range').addEventListener('click', e => {
     const btn = e.target.closest('button');
     if (!btn) return;
-    lowHarmonic = parseInt(btn.dataset.lo, 10);
+    mode = btn.dataset.mode;
     btn.parentNode.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === btn));
     buildKeys();
   });
